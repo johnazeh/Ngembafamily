@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Ngemba Financial Dashboard</title>
+
+<style>
+body { font-family: Arial; background:#f0f2f5; padding:20px; }
+h2 { margin-bottom:20px; }
+
+.login-box, .change-box {
+  max-width:300px;
+  background:white;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:20px;
+}
+
+input, button {
+  width:100%;
+  padding:10px;
+  margin-top:10px;
+}
+
+button {
+  background:#007bff;
+  color:white;
+  border:none;
+  cursor:pointer;
+}
+
+.top-bar {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+}
+
+#logoutBtn {
+  background: #ff4444;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  border: none;
+  cursor: pointer;
+  width: auto;
+  display: none; /* stays hidden until login */
+}
+
+
+.container {
+  display:flex;
+  flex-wrap:wrap;
+  gap:20px;
+}
+
+.card {
+  width:230px;
+  background:white;
+  padding:20px;
+  border-radius:15px;
+  box-shadow:0 10px 25px rgba(0,0,0,0.15);
+}
+
+.status-paid { color:green; font-weight:bold; }
+.status-owing { color:red; font-weight:bold; }
+
+#memberInfo { margin:10px 0; font-weight:bold; }
+.footer-info {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  font-size: 14px;
+  color: #333;
+}
+
+.footer-info a {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+.footer-info a:hover {
+  text-decoration: underline;
+}
+
+</style>
+</head>
+
+<body>
+<div class="dashboard-logo">
+  <img src="/images/Ngembalogo.png" alt="NgembaLogo" style="height:100px;">
+</div>
+<h2>Ngemba Members Financial Dashboard</h2>
+
+<div class="login-box" id="loginBox">
+  <input type="email" id="email" placeholder="Email">
+  <input type="password" id="password" placeholder="Password">
+  <button onclick="login()">Login</button>
+  <button onclick="forgotPassword()" style="background:#555;">Forgot Password</button>
+</div>
+
+<div class="change-box" id="changeBox" style="display:none;">
+  <input type="password" id="newPassword" placeholder="New Password">
+  <button onclick="changePassword()">Update Password</button>
+</div>
+
+<div class="top-bar">
+  <button id="logoutBtn" onclick="logout()">Logout</button>
+</div>
+
+
+<div id="memberInfo"></div>
+<div class="container" id="dashboard"></div>
+
+<script>
+let currentMember = null;
+const API = window.location.origin;
+
+// ---------------- LOGIN ----------------
+async function login() {
+  const email = document.getElementById("email").value.toLowerCase();
+  const password = document.getElementById("password").value;
+
+  if (!email || !password) return alert("Enter email and password");
+
+  try {
+    const res = await fetch(`${API}/login`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json();
+    if (data.error) return alert(data.error);
+
+    currentMember = data;
+
+    if (data.forceChange) {
+      document.getElementById("loginBox").style.display = "none";
+      document.getElementById("changeBox").style.display = "block";
+    } else {
+      showDashboard(data);
+    }
+
+  } catch (err) {
+    alert("Network error.");
+  }
+}
+
+// ---------------- CHANGE PASSWORD ----------------
+async function changePassword() {
+  const newPassword = document.getElementById("newPassword").value;
+  if (!newPassword) return alert("Enter new password");
+
+  const res = await fetch(`${API}/change-password`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      memberId: currentMember.MemberID,
+      newPassword
+    })
+  });
+
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+
+  alert("Password updated!");
+  document.getElementById("changeBox").style.display = "none";
+  showDashboard(currentMember);
+}
+
+// ---------------- FORGOT PASSWORD ----------------
+async function forgotPassword() {
+  const email = prompt("Enter your email:");
+  if (!email) return;
+
+  try {
+    const res = await fetch(`${API}/reset-password`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ email })
+    });
+
+    const data = await res.json();
+    alert(data.message || data.error);
+
+  } catch (err) {
+    alert("Network error.");
+  }
+}
+
+// ---------------- DASHBOARD ----------------
+async function showDashboard(member) {
+  localStorage.setItem("member", JSON.stringify(member));
+
+  document.getElementById("loginBox").style.display = "none";
+  document.getElementById("changeBox").style.display = "none";
+  document.getElementById("logoutBtn").style.display = "block";
+
+  document.getElementById("memberInfo").innerText =
+    `${member.Name} (${member.Email})`;
+
+  try {
+    const res = await fetch(`${API}/dashboard/${member.MemberID}`);
+    const data = await res.json();
+
+    let html = "";
+
+    // RPN
+    if (data.rpn && data.rpn.length > 0) {
+      const item = data.rpn[0];
+      const statusClass = item.Status === "PAID" ? "status-paid" : "status-owing";
+
+      html += `
+        <div class="card">
+          <h3>RPN SCHEME</h3>
+          <p>Call: ${item.RPNCallAmount ?? 0}</p>
+          <p>Paid: ${item.Paid ?? 0}</p>
+          <p>Owing: ${item.Owing ?? 0}</p>
+          <p style="color:#0066cc; font-weight:bold;">RPN Balance: ${item.RPNBalance ?? 0}</p>
+          <p class="${statusClass}">${item.Status}</p>
+        </div>
+      `;
+    }
+
+    // OTHER PAYMENTS
+    const types = ["registration", "fines", "project", "2025dues", "crydie"];
+
+    types.forEach(type => {
+      const record = data.otherPayments?.find(
+        p => p.PaymentType.toLowerCase() === type
+      );
+
+      const owed = record?.Owed ?? 0;
+      const paid = record?.Paid ?? 0;
+
+      html += `
+        <div class="card">
+          <h3>${type.toUpperCase()}</h3>
+          <p>Paid: ${paid}</p>
+          <p>Owing: ${owed}</p>
+          <p class="${owed > 0 ? "status-owing" : "status-paid"}">
+            ${owed > 0 ? "OWING" : "PAID"}
+          </p>
+        </div>
+      `;
+    });
+
+    document.getElementById("dashboard").innerHTML = html;
+
+  } catch (err) {
+    alert("Failed to load dashboard");
+  }
+}
+
+// ---------------- LOGOUT ----------------
+function logout() {
+  localStorage.removeItem("member");
+  location.reload();
+}
+
+// ---------------- AUTO LOGIN ----------------
+window.onload = () => {
+  const saved = localStorage.getItem("member");
+  if (saved) {
+    currentMember = JSON.parse(saved);
+    showDashboard(currentMember);
+  }
+};
+</script>
+<div class="footer-info">
+  <p>📧 Email: ngembafamily@yahoo.com</p>
+  <p>📘 Facebook: 
+    <a href="https://www.facebook.com/profile.php?id=61550802850027" target="_blank">
+      Ngemba Alberta Facebook Page
+    </a>
+  </p>
+</div>
+</body>
+</html>
